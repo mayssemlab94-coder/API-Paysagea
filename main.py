@@ -14,12 +14,9 @@ class ReponseGIS(BaseModel):
     ph_sol: float
     categorie_sol: str
 
-# 1. Le GPS accepte maintenant toutes les parties de l'adresse !
 async def trouver_gps(rue: str = "", code_postal: str = "", ville: str = "", pays: str = ""):
-    # On rassemble tous les morceaux proprement, séparés par une virgule
     morceaux = [rue, code_postal, ville, pays]
     recherche = ", ".join([m for m in morceaux if m != ""])
-    
     url = f"https://nominatim.openstreetmap.org/search?q={recherche}&format=json&limit=1"
     
     async with httpx.AsyncClient() as client:
@@ -30,12 +27,48 @@ async def trouver_gps(rue: str = "", code_postal: str = "", ville: str = "", pay
         return float(donnees[0]["lat"]), float(donnees[0]["lon"])
 
 async def trouver_climat(lat: float, lon: float):
-    return {"temp": -5.2, "zone": "8a", "precip": 120.5}
+    # Connexion à la VRAIE base de données météo (Open-Meteo)
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_min,precipitation_sum&timezone=auto"
+    async with httpx.AsyncClient() as client:
+        reponse = await client.get(url)
+        if reponse.status_code == 200:
+            donnees = reponse.json()
+            # On prend la température la plus basse prévue
+            temp_min = min(donnees["daily"]["temperature_2m_min"])
+            # On calcule le cumul de pluie
+            precip = sum(donnees["daily"]["precipitation_sum"])
+            
+            # Déduction intelligente de la vraie Zone USDA
+            if temp_min < -12: zone = "7a"
+            elif temp_min < -6: zone = "8a"
+            elif temp_min < -1: zone = "9a"
+            else: zone = "10a"
+            
+            return {"temp": temp_min, "zone": zone, "precip": round(precip, 1)}
+    return {"temp": 0.0, "zone": "Inconnue", "precip": 0.0}
 
 async def trouver_sol(lat: float, lon: float):
-    return {"ph": 6.5, "cat": "Neutre"}
+    # Connexion à la VRAIE base mondiale des sols (ISRIC SoilGrids)
+    url = f"https://rest.isric.org/soilgrids/v2.0/properties/query?lon={lon}&lat={lat}&property=phh2o&depth=0-5cm&value=mean"
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            reponse = await client.get(url)
+            if reponse.status_code == 200:
+                donnees = reponse.json()
+                # Calcul scientifique du vrai pH
+                valeur_brute = donnees["properties"]["layers"][0]["depths"][0]["values"]["mean"]
+                ph_reel = valeur_brute / 10
+                
+                # Catégorisation automatique du sol
+                if ph_reel < 6.5: cat = "Acide"
+                elif ph_reel > 7.5: cat = "Basique"
+                else: cat = "Neutre"
+                
+                return {"ph": round(ph_reel, 1), "cat": cat}
+    except Exception:
+        pass
+    return {"ph": 6.5, "cat": "Neutre (Serveur ISRIC indisponible)"}
 
-# 2. On crée 4 belles cases pour l'interface internet
 @app.get("/api/v1/gis-profile", response_model=ReponseGIS)
 async def obtenir_profil(
     rue: str = Query("", description="Numéro et nom de rue (ex: 10 Rue de la Paix)"),
@@ -43,11 +76,12 @@ async def obtenir_profil(
     ville: str = Query("", description="Ville (ex: Paris)"),
     pays: str = Query("", description="Pays (ex: France)")
 ):
-    # On vérifie qu'au moins une case importante est remplie
     if not rue and not code_postal and not ville:
          raise HTTPException(status_code=400, detail="Veuillez fournir au moins une ville ou un code postal")
     
     lat, lon = await trouver_gps(rue, code_postal, ville, pays)
+    
+    # On lance les recherches GPS, Météo et Sol en même temps !
     climat, sol = await asyncio.gather(trouver_climat(lat, lon), trouver_sol(lat, lon))
     
     return ReponseGIS(
