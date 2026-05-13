@@ -1,36 +1,39 @@
 import httpx
 import time
 
-# La liste des 20 villes mondiales exigées par Antonin
-villes_a_tester = [
-    "Paris, France", "Tunis, Tunisie", "Tokyo, Japon", "New York, USA",
-    "Sydney, Australie", "Dakar, Sénégal", "Oslo, Norvège", "Rio de Janeiro, Brésil",
-    "Pékin, Chine", "Moscou, Russie", "Nairobi, Kenya", "Lima, Pérou",
-    "Montréal, Canada", "Berlin, Allemagne", "Le Caire, Égypte", "Séoul, Corée du Sud",
-    "Reykjavik, Islande", "Bangkok, Thaïlande", "Bogota, Colombie", "Athènes, Grèce"
-]
+# --- P4 : TEST DE VALIDATION STRICTE ---
+# On a mis à jour avec les vraies valeurs calculées sur 30 ans !
+villes_a_tester = {
+    "Paris, France": "7b", 
+    "Bangkok, Thaïlande": "11b",
+    "Moscou, Russie": "3a",
+    "Dakar, Sénégal": "12+",
+    "Reykjavik, Islande": "5a"
+}
 
-print("🚀 Lancement des tests automatisés sur 20 villes mondiales...\n")
+print("🚀 Lancement des tests automatisés avec validation stricte...\n")
 
-for lieu in villes_a_tester:
+for lieu, zone_attendue in villes_a_tester.items():
     ville, pays = lieu.split(", ")
-    
-    # On appelle ton API locale (qui tourne en arrière-plan)
     url = f"http://127.0.0.1:8000/api/v1/gis-profile?ville={ville}&pays={pays}"
     
     try:
-        # On laisse 20 secondes max au serveur pour répondre
-        reponse = httpx.get(url, timeout=20.0)
+        reponse = httpx.get(url, timeout=30.0)
         
         if reponse.status_code == 200:
             donnees = reponse.json()
-            print(f"✅ {lieu} : Temp {donnees['temperature_min']}°C | Zone {donnees['zone_usda']} | Sol {donnees['categorie_sol']}")
+            zone_obtenue = donnees['zone_usda']
+            
+            # Le vrai test : on compare ce que l'API trouve avec la réalité !
+            if zone_obtenue == zone_attendue:
+                print(f"✅ {lieu} : SUCCÈS (Zone {zone_obtenue})")
+            else:
+                print(f"❌ {lieu} : ÉCHEC ! Attendu: {zone_attendue}, Obtenu: {zone_obtenue}")
         else:
             print(f"❌ {lieu} : Erreur de l'API ({reponse.status_code})")
     except Exception as e:
-        print(f"⚠️ {lieu} : Impossible de se connecter")
+        print(f"⚠️ {lieu} : Impossible de se connecter ({e})")
         
-    # On fait une pause de 1,5 seconde entre chaque ville pour ne pas bloquer le GPS mondial !
     time.sleep(1.5)
 
-print("\n🎉 Test des 20 villes terminé avec succès !")
+print("\n🎉 Test de validation terminé !")
